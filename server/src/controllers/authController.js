@@ -60,7 +60,10 @@ export async function login(req, res) {
       { expiresIn: '7d' }
     );
 
-    res.json({ token });
+    res.json({
+      token,
+      user: { id: user.id, email: user.email },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Something went wrong' });

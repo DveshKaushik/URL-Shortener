@@ -32,6 +32,12 @@ export function login(email, password) {
   })
 }
 
+export function getMe(token) {
+  return request('/api/me', {
+    headers: authHeaders(token),
+  })
+}
+
 export function shorten(token, longUrl) {
   return request('/api/shorten', {
     method: 'POST',

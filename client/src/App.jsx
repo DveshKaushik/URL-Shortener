@@ -1,11 +1,23 @@
 import { useEffect, useState } from 'react'
+import { QRCodeCanvas } from 'qrcode.react'
 import './App.css'
-import { getLinks, login, register, shorten, SHORT_BASE } from './api.js'
+import { getLinks, getMe, login, register, shorten, SHORT_BASE } from './api.js'
+
+function downloadQr(shortCode) {
+  const canvas = document.getElementById(`qr-${shortCode}`)
+  if (!canvas) return
+  const link = document.createElement('a')
+  link.download = `shortly-${shortCode}.png`
+  link.href = canvas.toDataURL('image/png')
+  link.click()
+}
 
 const TOKEN_KEY = 'shortly_token'
+const EMAIL_KEY = 'shortly_email'
 
 export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '')
+  const [userEmail, setUserEmail] = useState(() => localStorage.getItem(EMAIL_KEY) || '')
   const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -15,6 +27,14 @@ export default function App() {
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
 
+  function clearSession() {
+    localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(EMAIL_KEY)
+    setToken('')
+    setUserEmail('')
+    setLinks([])
+  }
+
   useEffect(() => {
     if (!token) {
       setLinks([])
@@ -23,32 +43,45 @@ export default function App() {
 
     let cancelled = false
 
-    async function loadLinks() {
+    async function loadSession() {
       try {
+        if (!userEmail) {
+          const me = await getMe(token)
+          const nextEmail = me.user?.email || ''
+          if (!cancelled && nextEmail) {
+            localStorage.setItem(EMAIL_KEY, nextEmail)
+            setUserEmail(nextEmail)
+          }
+        }
         const data = await getLinks(token)
         if (!cancelled) setLinks(data.links || [])
       } catch (err) {
         if (!cancelled) {
-          localStorage.removeItem(TOKEN_KEY)
-          setToken('')
+          clearSession()
           setError(err.message)
         }
       }
     }
 
-    loadLinks()
+    loadSession()
 
     // Refresh counts when the user returns to this tab after opening a short link
     function onVisible() {
-      if (document.visibilityState === 'visible') loadLinks()
+      if (document.visibilityState === 'visible') {
+        getLinks(token)
+          .then((data) => {
+            if (!cancelled) setLinks(data.links || [])
+          })
+          .catch(() => {})
+      }
     }
     document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('focus', loadLinks)
+    window.addEventListener('focus', onVisible)
 
     return () => {
       cancelled = true
       document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('focus', loadLinks)
+      window.removeEventListener('focus', onVisible)
     }
   }, [token])
 
@@ -63,8 +96,11 @@ export default function App() {
         setNotice('Account created. Signing you in…')
       }
       const data = await login(email, password)
+      const nextEmail = data.user?.email || email
       localStorage.setItem(TOKEN_KEY, data.token)
+      localStorage.setItem(EMAIL_KEY, nextEmail)
       setToken(data.token)
+      setUserEmail(nextEmail)
       setPassword('')
       setNotice('')
     } catch (err) {
@@ -101,9 +137,7 @@ export default function App() {
   }
 
   function handleLogout() {
-    localStorage.removeItem(TOKEN_KEY)
-    setToken('')
-    setLinks([])
+    clearSession()
     setNotice('')
     setError('')
   }
@@ -126,9 +160,12 @@ export default function App() {
           <span>url shortener</span>
         </div>
         {token ? (
-          <button className="logout" type="button" onClick={handleLogout}>
-            Log out
-          </button>
+          <div className="user-bar">
+            {userEmail ? <span className="user-name">{userEmail}</span> : null}
+            <button className="logout" type="button" onClick={handleLogout}>
+              Log out
+            </button>
+          </div>
         ) : null}
       </header>
 
@@ -220,30 +257,53 @@ export default function App() {
             {links.length === 0 ? (
               <p className="empty">No links yet. Create your first one above.</p>
             ) : (
-              links.map((link) => (
-                <article className="link-item" key={link.id}>
-                  <a
-                    className="short"
-                    href={`${SHORT_BASE}/${link.short_code}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {SHORT_BASE}/{link.short_code}
-                  </a>
-                  <div className="long-url">{link.long_url}</div>
-                  <div className="link-meta">
-                    <span>{link.click_count ?? 0} clicks</span>
-                    <span>{new Date(link.created_at).toLocaleString()}</span>
-                    <button
-                      className="copy-btn"
-                      type="button"
-                      onClick={() => copyShort(link.short_code)}
-                    >
-                      Copy
-                    </button>
-                  </div>
-                </article>
-              ))
+              links.map((link) => {
+                const shortUrl = `${SHORT_BASE}/${link.short_code}`
+                return (
+                  <article className="link-item" key={link.id}>
+                    <div className="link-main">
+                      <a
+                        className="short"
+                        href={shortUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {shortUrl}
+                      </a>
+                      <div className="long-url">{link.long_url}</div>
+                      <div className="link-meta">
+                        <span>{link.click_count ?? 0} clicks</span>
+                        <span>{new Date(link.created_at).toLocaleString()}</span>
+                        <button
+                          className="copy-btn"
+                          type="button"
+                          onClick={() => copyShort(link.short_code)}
+                        >
+                          Copy
+                        </button>
+                        <button
+                          className="copy-btn"
+                          type="button"
+                          onClick={() => downloadQr(link.short_code)}
+                        >
+                          Download QR
+                        </button>
+                      </div>
+                    </div>
+                    <div className="link-qr" title={shortUrl}>
+                      <QRCodeCanvas
+                        id={`qr-${link.short_code}`}
+                        value={shortUrl}
+                        size={96}
+                        bgColor="#e8f5ef"
+                        fgColor="#071410"
+                        level="M"
+                        includeMargin
+                      />
+                    </div>
+                  </article>
+                )
+              })
             )}
           </div>
         </section>
