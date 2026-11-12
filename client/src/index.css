@@ -1,0 +1,52 @@
+:root {
+  --ink: #071410;
+  --panel: #0d221c;
+  --panel-2: #123028;
+  --line: #1f473c;
+  --text: #e8f5ef;
+  --muted: #8fb3a6;
+  --accent: #b8f34d;
+  --accent-ink: #102016;
+  --danger: #ff7b6b;
+  --glow: rgba(184, 243, 77, 0.18);
+  font-family: 'Syne', sans-serif;
+  color: var(--text);
+  background: var(--ink);
+  line-height: 1.45;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(ellipse 80% 50% at 10% -10%, rgba(184, 243, 77, 0.12), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 90% 10%, rgba(56, 168, 140, 0.18), transparent 50%),
+    linear-gradient(160deg, #071410 0%, #0a1c17 45%, #0d241c 100%);
+  background-attachment: fixed;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+}

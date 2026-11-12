@@ -1,0 +1,252 @@
+.app {
+  width: min(920px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 2.5rem 0 4rem;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 2.5rem;
+  animation: rise 0.6s ease both;
+}
+
+.brand-mark {
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+}
+
+.brand-mark h1 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+.brand-mark span {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.logout {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  padding: 0.55rem 0.9rem;
+  border-radius: 999px;
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.logout:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--glow);
+}
+
+.hero-copy {
+  margin: 0 0 1.75rem;
+  max-width: 34rem;
+  color: var(--muted);
+  font-size: 1.05rem;
+  animation: rise 0.7s ease both;
+}
+
+.panel {
+  background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+  border: 1px solid var(--line);
+  border-radius: 1.25rem;
+  padding: 1.5rem;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  animation: rise 0.8s ease both;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.tabs button {
+  flex: 1;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  padding: 0.7rem 1rem;
+  border-radius: 0.8rem;
+  transition: all 0.2s ease;
+}
+
+.tabs button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+.form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.form label {
+  display: grid;
+  gap: 0.4rem;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.form input {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  border-radius: 0.75rem;
+  padding: 0.85rem 1rem;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.form input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--glow);
+}
+
+.primary {
+  border: none;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+  padding: 0.9rem 1.1rem;
+  border-radius: 0.85rem;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.primary:hover:not(:disabled) {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.primary:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.error {
+  margin: 0;
+  color: var(--danger);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.85rem;
+}
+
+.success {
+  margin: 0;
+  color: var(--accent);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.9rem;
+  word-break: break-all;
+}
+
+.workspace {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.shorten-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .shorten-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.links {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.links h2 {
+  margin: 0.5rem 0 0;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+}
+
+.link-item {
+  display: grid;
+  gap: 0.45rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(0, 0, 0, 0.18);
+  animation: rise 0.45s ease both;
+}
+
+.link-item a.short {
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.link-item a.short:hover {
+  text-decoration: underline;
+}
+
+.link-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  color: var(--muted);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.78rem;
+}
+
+.long-url {
+  color: var(--muted);
+  font-size: 0.92rem;
+  overflow-wrap: anywhere;
+}
+
+.empty {
+  color: var(--muted);
+  margin: 0;
+}
+
+.copy-btn {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.copy-btn:hover {
+  border-color: var(--accent);
+  background: var(--glow);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
