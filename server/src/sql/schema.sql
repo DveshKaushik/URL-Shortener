@@ -16,3 +16,6 @@ CREATE TABLE IF NOT EXISTS links (
   created_at TIMESTAMP DEFAULT NOW(),
   expires_at TIMESTAMP
 );
+
+-- Speeds up "already shortened?" lookups per user
+CREATE INDEX IF NOT EXISTS idx_links_user_long_url ON links (user_id, long_url);

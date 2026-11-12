@@ -1,5 +1,6 @@
 import pool from '../db.js';
 import { generateShortCode } from '../utils/shortCode.js';
+import { getCachedLink, setCachedLink } from '../utils/urlCache.js';
 
 function isValidUrl(value) {
   try {
@@ -10,8 +11,42 @@ function isValidUrl(value) {
   }
 }
 
+async function findExistingLink(userId, longUrl) {
+  const cached = getCachedLink(userId, longUrl);
+  if (cached) {
+    // Cache only proves the mapping exists; always re-read click_count from DB
+    const fresh = await pool.query(
+      `SELECT id, short_code, long_url, click_count, created_at
+       FROM links
+       WHERE id = $1
+         AND (expires_at IS NULL OR expires_at > NOW())`,
+      [cached.id]
+    );
+    const link = fresh.rows[0] ?? null;
+    if (link) {
+      setCachedLink(userId, longUrl, link);
+      return link;
+    }
+  }
+
+  const result = await pool.query(
+    `SELECT id, short_code, long_url, click_count, created_at
+     FROM links
+     WHERE user_id = $1
+       AND long_url = $2
+       AND (expires_at IS NULL OR expires_at > NOW())
+     ORDER BY created_at ASC
+     LIMIT 1`,
+    [userId, longUrl]
+  );
+
+  const link = result.rows[0] ?? null;
+  if (link) setCachedLink(userId, longUrl, link);
+  return link;
+}
+
 export async function createShortLink(req, res) {
-  const { longUrl } = req.body;
+  const longUrl = typeof req.body.longUrl === 'string' ? req.body.longUrl.trim() : '';
   const userId = req.user.userId;
 
   if (!longUrl) {
@@ -23,6 +58,11 @@ export async function createShortLink(req, res) {
   }
 
   try {
+    const existing = await findExistingLink(userId, longUrl);
+    if (existing) {
+      return res.status(200).json({ link: existing, cached: true });
+    }
+
     let shortCode;
     let inserted = false;
     let attempts = 0;
@@ -38,10 +78,13 @@ export async function createShortLink(req, res) {
            RETURNING id, short_code, long_url, click_count, created_at`,
           [shortCode, longUrl, userId]
         );
+        const link = result.rows[0];
+        setCachedLink(userId, longUrl, link);
         inserted = true;
-        return res.status(201).json({ link: result.rows[0] });
+        return res.status(201).json({ link, cached: false });
       } catch (err) {
         if (err.code === '23505') {
+          // Unique short_code collision — retry with a new code
           continue;
         }
         throw err;

@@ -22,7 +22,8 @@ export default function App() {
     }
 
     let cancelled = false
-    ;(async () => {
+
+    async function loadLinks() {
       try {
         const data = await getLinks(token)
         if (!cancelled) setLinks(data.links || [])
@@ -33,10 +34,21 @@ export default function App() {
           setError(err.message)
         }
       }
-    })()
+    }
+
+    loadLinks()
+
+    // Refresh counts when the user returns to this tab after opening a short link
+    function onVisible() {
+      if (document.visibilityState === 'visible') loadLinks()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', loadLinks)
 
     return () => {
       cancelled = true
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', loadLinks)
     }
   }, [token])
 
@@ -69,9 +81,18 @@ export default function App() {
     setBusy(true)
     try {
       const data = await shorten(token, longUrl.trim())
-      setLinks((prev) => [data.link, ...prev])
+      const shortUrl = `${SHORT_BASE}/${data.link.short_code}`
+      if (data.cached) {
+        setLinks((prev) => {
+          const without = prev.filter((l) => l.id !== data.link.id)
+          return [data.link, ...without]
+        })
+        setNotice(`Already shortened: ${shortUrl}`)
+      } else {
+        setLinks((prev) => [data.link, ...prev])
+        setNotice(shortUrl)
+      }
       setLongUrl('')
-      setNotice(`${SHORT_BASE}/${data.link.short_code}`)
     } catch (err) {
       setError(err.message)
     } finally {
