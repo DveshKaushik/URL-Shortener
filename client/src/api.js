@@ -38,16 +38,34 @@ export function getMe(token) {
   })
 }
 
-export function shorten(token, longUrl) {
+export function shorten(token, longUrl, options = {}) {
+  const body = { longUrl }
+  if (typeof options.enabled === 'boolean') {
+    body.enabled = options.enabled
+  }
+  if (options.activatesAt) {
+    body.activatesAt = options.activatesAt
+  }
+  if (options.customAlias) {
+    body.customAlias = options.customAlias
+  }
   return request('/api/shorten', {
     method: 'POST',
     headers: authHeaders(token),
-    body: JSON.stringify({ longUrl }),
+    body: JSON.stringify(body),
   })
 }
 
 export function getLinks(token) {
   return request('/api/links', {
     headers: authHeaders(token),
+  })
+}
+
+export function updateLink(token, id, patch) {
+  return request(`/api/links/${id}`, {
+    method: 'PATCH',
+    headers: authHeaders(token),
+    body: JSON.stringify(patch),
   })
 }

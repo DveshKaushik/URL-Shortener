@@ -1,6 +1,14 @@
 import pool from '../db.js';
-import { generateShortCode } from '../utils/shortCode.js';
-import { getCachedLink, setCachedLink } from '../utils/urlCache.js';
+import { generateShortCode, normalizeCustomAlias } from '../utils/shortCode.js';
+import {
+  deleteCachedLink,
+  getCachedLink,
+  setCachedLink,
+} from '../utils/urlCache.js';
+import { recordLinkClick } from '../utils/clickAnalytics.js';
+
+const LINK_COLUMNS =
+  'id, short_code, long_url, click_count, unique_click_count, created_at, expires_at, enabled, activates_at';
 
 function isValidUrl(value) {
   try {
@@ -11,12 +19,48 @@ function isValidUrl(value) {
   }
 }
 
+function parseOptionalDate(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date.toISOString();
+}
+
+/** When activates_at is due, turn disabled links on. */
+async function enableDueLinks({ userId, linkId } = {}) {
+  const filters = [
+    'enabled = FALSE',
+    'activates_at IS NOT NULL',
+    'activates_at <= NOW()',
+  ];
+  const values = [];
+
+  if (userId != null) {
+    values.push(userId);
+    filters.push(`user_id = $${values.length}`);
+  }
+  if (linkId != null) {
+    values.push(linkId);
+    filters.push(`id = $${values.length}`);
+  }
+
+  const result = await pool.query(
+    `UPDATE links
+     SET enabled = TRUE
+     WHERE ${filters.join(' AND ')}
+     RETURNING ${LINK_COLUMNS}`,
+    values
+  );
+
+  return result.rows;
+}
+
 async function findExistingLink(userId, longUrl) {
   const cached = getCachedLink(userId, longUrl);
   if (cached) {
     // Cache only proves the mapping exists; always re-read click_count from DB
     const fresh = await pool.query(
-      `SELECT id, short_code, long_url, click_count, created_at
+      `SELECT ${LINK_COLUMNS}
        FROM links
        WHERE id = $1
          AND (expires_at IS NULL OR expires_at > NOW())`,
@@ -30,7 +74,7 @@ async function findExistingLink(userId, longUrl) {
   }
 
   const result = await pool.query(
-    `SELECT id, short_code, long_url, click_count, created_at
+    `SELECT ${LINK_COLUMNS}
      FROM links
      WHERE user_id = $1
        AND long_url = $2
@@ -48,6 +92,12 @@ async function findExistingLink(userId, longUrl) {
 export async function createShortLink(req, res) {
   const longUrl = typeof req.body.longUrl === 'string' ? req.body.longUrl.trim() : '';
   const userId = req.user.userId;
+  const enabled = req.body.enabled === false ? false : true;
+  const activatesAt = parseOptionalDate(req.body.activatesAt);
+  const wantsCustomAlias =
+    req.body.customAlias !== undefined &&
+    req.body.customAlias !== null &&
+    String(req.body.customAlias).trim() !== '';
 
   if (!longUrl) {
     return res.status(400).json({ error: 'longUrl is required' });
@@ -57,10 +107,57 @@ export async function createShortLink(req, res) {
     return res.status(400).json({ error: 'longUrl must be a valid http(s) URL' });
   }
 
+  if (activatesAt === undefined) {
+    return res.status(400).json({ error: 'activatesAt must be a valid date' });
+  }
+
+  let customAlias = null;
+  if (wantsCustomAlias) {
+    const normalized = normalizeCustomAlias(req.body.customAlias);
+    if (!normalized.ok) {
+      return res.status(400).json({ error: normalized.error });
+    }
+    customAlias = normalized.alias;
+  }
+
   try {
-    const existing = await findExistingLink(userId, longUrl);
-    if (existing) {
-      return res.status(200).json({ link: existing, cached: true });
+    // Same destination reuses an existing link only when no custom alias is requested
+    if (!customAlias) {
+      const existing = await findExistingLink(userId, longUrl);
+      if (existing) {
+        if ('activatesAt' in req.body) {
+          const result = await pool.query(
+            `UPDATE links
+             SET activates_at = $1
+             WHERE id = $2 AND user_id = $3
+             RETURNING ${LINK_COLUMNS}`,
+            [activatesAt, existing.id, userId]
+          );
+          const link = result.rows[0] ?? existing;
+          setCachedLink(userId, longUrl, link);
+          return res.status(200).json({ link, cached: true });
+        }
+        return res.status(200).json({ link: existing, cached: true });
+      }
+    }
+
+    if (customAlias) {
+      try {
+        const result = await pool.query(
+          `INSERT INTO links (short_code, long_url, user_id, enabled, activates_at)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING ${LINK_COLUMNS}`,
+          [customAlias, longUrl, userId, enabled, activatesAt]
+        );
+        const link = result.rows[0];
+        setCachedLink(userId, longUrl, link);
+        return res.status(201).json({ link, cached: false });
+      } catch (err) {
+        if (err.code === '23505') {
+          return res.status(409).json({ error: 'That alias is already taken' });
+        }
+        throw err;
+      }
     }
 
     let shortCode;
@@ -73,10 +170,10 @@ export async function createShortLink(req, res) {
 
       try {
         const result = await pool.query(
-          `INSERT INTO links (short_code, long_url, user_id)
-           VALUES ($1, $2, $3)
-           RETURNING id, short_code, long_url, click_count, created_at`,
-          [shortCode, longUrl, userId]
+          `INSERT INTO links (short_code, long_url, user_id, enabled, activates_at)
+           VALUES ($1, $2, $3, $4, $5)
+           RETURNING ${LINK_COLUMNS}`,
+          [shortCode, longUrl, userId, enabled, activatesAt]
         );
         const link = result.rows[0];
         setCachedLink(userId, longUrl, link);
@@ -104,8 +201,10 @@ export async function getMyLinks(req, res) {
   const userId = req.user.userId;
 
   try {
+    await enableDueLinks({ userId });
+
     const result = await pool.query(
-      `SELECT id, short_code, long_url, click_count, created_at
+      `SELECT ${LINK_COLUMNS}
        FROM links
        WHERE user_id = $1
        ORDER BY created_at DESC`,
@@ -119,31 +218,164 @@ export async function getMyLinks(req, res) {
   }
 }
 
+export async function updateLink(req, res) {
+  const userId = req.user.userId;
+  const linkId = Number(req.params.id);
+
+  if (!Number.isInteger(linkId) || linkId < 1) {
+    return res.status(400).json({ error: 'Invalid link id' });
+  }
+
+  const updates = [];
+  const values = [];
+  let i = 1;
+  let nextLongUrl = null;
+
+  if ('longUrl' in req.body) {
+    const longUrl =
+      typeof req.body.longUrl === 'string' ? req.body.longUrl.trim() : '';
+    if (!longUrl) {
+      return res.status(400).json({ error: 'longUrl is required' });
+    }
+    if (!isValidUrl(longUrl)) {
+      return res
+        .status(400)
+        .json({ error: 'longUrl must be a valid http(s) URL' });
+    }
+    nextLongUrl = longUrl;
+    updates.push(`long_url = $${i++}`);
+    values.push(longUrl);
+  }
+
+  if (typeof req.body.enabled === 'boolean') {
+    updates.push(`enabled = $${i++}`);
+    values.push(req.body.enabled);
+  }
+
+  if ('activatesAt' in req.body) {
+    const activatesAt = parseOptionalDate(req.body.activatesAt);
+    if (activatesAt === undefined) {
+      return res.status(400).json({ error: 'activatesAt must be a valid date' });
+    }
+    updates.push(`activates_at = $${i++}`);
+    values.push(activatesAt);
+  } else if (req.body.enabled === false) {
+    // Manual disable after a due schedule should stick (don't auto-re-enable)
+    updates.push(
+      `activates_at = CASE
+         WHEN activates_at IS NOT NULL AND activates_at <= NOW() THEN NULL
+         ELSE activates_at
+       END`
+    );
+  }
+
+  if (updates.length === 0) {
+    return res.status(400).json({ error: 'No valid fields to update' });
+  }
+
+  values.push(linkId, userId);
+
+  try {
+    const previous =
+      nextLongUrl != null
+        ? await pool.query(
+            `SELECT long_url FROM links WHERE id = $1 AND user_id = $2`,
+            [linkId, userId]
+          )
+        : null;
+
+    if (nextLongUrl != null && !previous.rows[0]) {
+      return res.status(404).json({ error: 'Link not found' });
+    }
+
+    const result = await pool.query(
+      `UPDATE links
+       SET ${updates.join(', ')}
+       WHERE id = $${i++}
+         AND user_id = $${i}
+       RETURNING ${LINK_COLUMNS}`,
+      values
+    );
+
+    let link = result.rows[0];
+    if (!link) {
+      return res.status(404).json({ error: 'Link not found' });
+    }
+
+    // Schedule already due → enable immediately if still disabled
+    const promoted = await enableDueLinks({ userId, linkId: link.id });
+    if (promoted[0]) link = promoted[0];
+
+    if (nextLongUrl != null) {
+      const oldUrl = previous.rows[0].long_url;
+      if (oldUrl !== link.long_url) {
+        deleteCachedLink(userId, oldUrl);
+      }
+    }
+
+    setCachedLink(userId, link.long_url, link);
+    res.json({ link });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Something went wrong' });
+  }
+}
+
 export async function redirectToLongUrl(req, res) {
   const { code } = req.params;
 
   // Keep reserved API paths from being treated as short codes
-  if (['api', 'test-db'].includes(code)) {
+  if (
+    ['api', 'test-db', 'links', 'shorten', 'register', 'login', 'me', 'analytics'].includes(
+      code.toLowerCase()
+    )
+  ) {
     return res.status(404).json({ error: 'Not found' });
   }
 
   try {
-    const result = await pool.query(
-      `UPDATE links
-       SET click_count = click_count + 1
-       WHERE short_code = $1
-         AND (expires_at IS NULL OR expires_at > NOW())
-       RETURNING long_url`,
+    const lookup = await pool.query(
+      `SELECT id, long_url, enabled, activates_at, expires_at
+       FROM links
+       WHERE short_code = $1`,
       [code]
     );
 
-    const link = result.rows[0];
+    const link = lookup.rows[0];
 
     if (!link) {
       return res.status(404).json({ error: 'Short link not found' });
     }
 
+    if (link.expires_at && new Date(link.expires_at) <= new Date()) {
+      return res.status(404).json({ error: 'Short link not found' });
+    }
+
+    if (link.activates_at && new Date(link.activates_at) > new Date()) {
+      return res.status(403).json({
+        error: 'This link is not active yet',
+        activatesAt: link.activates_at,
+      });
+    }
+
+    // Activation time reached → turn the link on if it was disabled
+    if (!link.enabled && link.activates_at) {
+      const promoted = await enableDueLinks({ linkId: link.id });
+      if (promoted[0]) {
+        link.enabled = true;
+      }
+    }
+
+    if (!link.enabled) {
+      return res.status(403).json({ error: 'This link is disabled' });
+    }
+
     res.redirect(link.long_url);
+
+    // Detailed analytics (total/unique, geo, device, etc.) — do not block redirect
+    recordLinkClick(req, link.id).catch((err) => {
+      console.error('Failed to record click analytics:', err);
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Something went wrong' });

@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react'
 import { QRCodeCanvas } from 'qrcode.react'
 import './App.css'
-import { getLinks, getMe, login, register, shorten, SHORT_BASE } from './api.js'
+import {
+  getLinks,
+  getMe,
+  login,
+  register,
+  shorten,
+  updateLink,
+  SHORT_BASE,
+} from './api.js'
 
 function downloadQr(shortCode) {
   const canvas = document.getElementById(`qr-${shortCode}`)
@@ -10,6 +18,40 @@ function downloadQr(shortCode) {
   link.download = `shortly-${shortCode}.png`
   link.href = canvas.toDataURL('image/png')
   link.click()
+}
+
+function toLocalInputValue(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function fromLocalInputValue(value) {
+  if (!value) return null
+  const match = String(value).match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/
+  )
+  if (!match) return null
+  const [, y, mo, d, h, mi] = match
+  const date = new Date(
+    Number(y),
+    Number(mo) - 1,
+    Number(d),
+    Number(h),
+    Number(mi)
+  )
+  if (Number.isNaN(date.getTime())) return null
+  return date.toISOString()
+}
+
+function linkStatus(link) {
+  if (link.activates_at && new Date(link.activates_at) > new Date()) {
+    return { key: 'scheduled', label: 'Scheduled' }
+  }
+  if (!link.enabled) return { key: 'disabled', label: 'Disabled' }
+  return { key: 'active', label: 'Active' }
 }
 
 const TOKEN_KEY = 'shortly_token'
@@ -22,7 +64,11 @@ export default function App() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [longUrl, setLongUrl] = useState('')
+  const [customAlias, setCustomAlias] = useState('')
+  const [activatesAt, setActivatesAt] = useState('')
   const [links, setLinks] = useState([])
+  const [scheduleDrafts, setScheduleDrafts] = useState({})
+  const [destinationDrafts, setDestinationDrafts] = useState({})
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
@@ -33,6 +79,37 @@ export default function App() {
     setToken('')
     setUserEmail('')
     setLinks([])
+  }
+
+  function syncScheduleDrafts(nextLinks) {
+    const drafts = {}
+    for (const link of nextLinks) {
+      drafts[link.id] = toLocalInputValue(link.activates_at)
+    }
+    setScheduleDrafts(drafts)
+  }
+
+  function syncDestinationDrafts(nextLinks) {
+    const drafts = {}
+    for (const link of nextLinks) {
+      drafts[link.id] = link.long_url
+    }
+    setDestinationDrafts(drafts)
+  }
+
+  function replaceLink(updated) {
+    setLinks((prev) => {
+      const next = prev.map((l) => (l.id === updated.id ? updated : l))
+      return next
+    })
+    setScheduleDrafts((prev) => ({
+      ...prev,
+      [updated.id]: toLocalInputValue(updated.activates_at),
+    }))
+    setDestinationDrafts((prev) => ({
+      ...prev,
+      [updated.id]: updated.long_url,
+    }))
   }
 
   useEffect(() => {
@@ -54,7 +131,12 @@ export default function App() {
           }
         }
         const data = await getLinks(token)
-        if (!cancelled) setLinks(data.links || [])
+        if (!cancelled) {
+          const nextLinks = data.links || []
+          setLinks(nextLinks)
+          syncScheduleDrafts(nextLinks)
+          syncDestinationDrafts(nextLinks)
+        }
       } catch (err) {
         if (!cancelled) {
           clearSession()
@@ -65,12 +147,16 @@ export default function App() {
 
     loadSession()
 
-    // Refresh counts when the user returns to this tab after opening a short link
     function onVisible() {
       if (document.visibilityState === 'visible') {
         getLinks(token)
           .then((data) => {
-            if (!cancelled) setLinks(data.links || [])
+            if (!cancelled) {
+              const nextLinks = data.links || []
+              setLinks(nextLinks)
+              syncScheduleDrafts(nextLinks)
+              syncDestinationDrafts(nextLinks)
+            }
           })
           .catch(() => {})
       }
@@ -116,7 +202,11 @@ export default function App() {
     setNotice('')
     setBusy(true)
     try {
-      const data = await shorten(token, longUrl.trim())
+      const alias = customAlias.trim()
+      const data = await shorten(token, longUrl.trim(), {
+        activatesAt: fromLocalInputValue(activatesAt),
+        ...(alias ? { customAlias: alias } : {}),
+      })
       const shortUrl = `${SHORT_BASE}/${data.link.short_code}`
       if (data.cached) {
         setLinks((prev) => {
@@ -128,11 +218,81 @@ export default function App() {
         setLinks((prev) => [data.link, ...prev])
         setNotice(shortUrl)
       }
+      setScheduleDrafts((prev) => ({
+        ...prev,
+        [data.link.id]: toLocalInputValue(data.link.activates_at),
+      }))
+      setDestinationDrafts((prev) => ({
+        ...prev,
+        [data.link.id]: data.link.long_url,
+      }))
       setLongUrl('')
+      setCustomAlias('')
+      setActivatesAt('')
     } catch (err) {
       setError(err.message)
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function handleToggleEnabled(link) {
+    setError('')
+    setNotice('')
+    try {
+      const data = await updateLink(token, link.id, { enabled: !link.enabled })
+      replaceLink(data.link)
+      setNotice(data.link.enabled ? 'Link enabled' : 'Link disabled')
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function handleSaveSchedule(link, draftOverride) {
+    setError('')
+    setNotice('')
+    try {
+      const draft =
+        draftOverride !== undefined
+          ? draftOverride
+          : scheduleDrafts[link.id] || ''
+      const data = await updateLink(token, link.id, {
+        activatesAt: fromLocalInputValue(draft),
+      })
+      replaceLink(data.link)
+      setNotice(
+        data.link.activates_at
+          ? `Activates ${new Date(data.link.activates_at).toLocaleString()}`
+          : 'Schedule cleared — link active now'
+      )
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function handleClearSchedule(link) {
+    setScheduleDrafts((prev) => ({ ...prev, [link.id]: '' }))
+    await handleSaveSchedule(link, '')
+  }
+
+  async function handleSaveDestination(link) {
+    setError('')
+    setNotice('')
+    const nextUrl = (destinationDrafts[link.id] || '').trim()
+    if (!nextUrl) {
+      setError('Destination URL is required')
+      return
+    }
+    if (nextUrl === link.long_url) {
+      setNotice('Destination unchanged')
+      return
+    }
+    try {
+      const data = await updateLink(token, link.id, { longUrl: nextUrl })
+      replaceLink(data.link)
+      setNotice('Destination updated')
+    } catch (err) {
+      setError(err.message)
     }
   }
 
@@ -229,7 +389,10 @@ export default function App() {
         </>
       ) : (
         <section className="workspace">
-          <p className="hero-copy">Paste a long URL. Get a short link you can share.</p>
+          <p className="hero-copy">
+            Paste a long URL. Optionally pick a custom alias like{' '}
+            <span className="inline-mono">/myportfolio</span>.
+          </p>
           <div className="panel">
             <form className="form" onSubmit={handleShorten}>
               <label>
@@ -247,6 +410,32 @@ export default function App() {
                   </button>
                 </div>
               </label>
+              <label>
+                Custom alias (optional)
+                <div className="alias-row">
+                  <span className="alias-prefix">{SHORT_BASE}/</span>
+                  <input
+                    type="text"
+                    placeholder="myportfolio"
+                    value={customAlias}
+                    onChange={(e) => setCustomAlias(e.target.value)}
+                    minLength={3}
+                    maxLength={64}
+                    pattern="[A-Za-z0-9][A-Za-z0-9_-]*[A-Za-z0-9]|[A-Za-z0-9]{3,}"
+                    title="3–64 characters: letters, numbers, hyphens, underscores"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </div>
+              </label>
+              <label>
+                Activate at (optional)
+                <input
+                  type="datetime-local"
+                  value={activatesAt}
+                  onChange={(e) => setActivatesAt(e.target.value)}
+                />
+              </label>
               {error ? <p className="error">{error}</p> : null}
               {notice ? <p className="success">{notice}</p> : null}
             </form>
@@ -259,18 +448,52 @@ export default function App() {
             ) : (
               links.map((link) => {
                 const shortUrl = `${SHORT_BASE}/${link.short_code}`
+                const status = linkStatus(link)
                 return (
-                  <article className="link-item" key={link.id}>
+                  <article
+                    className={`link-item ${status.key === 'disabled' ? 'is-disabled' : ''}`}
+                    key={link.id}
+                  >
                     <div className="link-main">
-                      <a
-                        className="short"
-                        href={shortUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {shortUrl}
-                      </a>
-                      <div className="long-url">{link.long_url}</div>
+                      <div className="link-title-row">
+                        <a
+                          className="short"
+                          href={shortUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {shortUrl}
+                        </a>
+                        <span className={`status-pill status-${status.key}`}>
+                          {status.label}
+                        </span>
+                      </div>
+                      <div className="link-destination">
+                        <label>
+                          Destination
+                          <input
+                            type="url"
+                            value={destinationDrafts[link.id] ?? link.long_url}
+                            onChange={(e) =>
+                              setDestinationDrafts((prev) => ({
+                                ...prev,
+                                [link.id]: e.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <button
+                          className="copy-btn"
+                          type="button"
+                          onClick={() => handleSaveDestination(link)}
+                          disabled={
+                            (destinationDrafts[link.id] ?? link.long_url).trim() ===
+                            link.long_url
+                          }
+                        >
+                          Save URL
+                        </button>
+                      </div>
                       <div className="link-meta">
                         <span>{link.click_count ?? 0} clicks</span>
                         <span>{new Date(link.created_at).toLocaleString()}</span>
@@ -288,6 +511,44 @@ export default function App() {
                         >
                           Download QR
                         </button>
+                        <button
+                          className="copy-btn"
+                          type="button"
+                          onClick={() => handleToggleEnabled(link)}
+                        >
+                          {link.enabled ? 'Disable' : 'Enable'}
+                        </button>
+                      </div>
+                      <div className="link-schedule">
+                        <label>
+                          Activate at
+                          <input
+                            type="datetime-local"
+                            value={scheduleDrafts[link.id] || ''}
+                            onChange={(e) =>
+                              setScheduleDrafts((prev) => ({
+                                ...prev,
+                                [link.id]: e.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <button
+                          className="copy-btn"
+                          type="button"
+                          onClick={() => handleSaveSchedule(link)}
+                        >
+                          Save schedule
+                        </button>
+                        {scheduleDrafts[link.id] || link.activates_at ? (
+                          <button
+                            className="copy-btn"
+                            type="button"
+                            onClick={() => handleClearSchedule(link)}
+                          >
+                            Clear
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                     <div className="link-qr" title={shortUrl}>

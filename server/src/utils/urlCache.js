@@ -13,6 +13,10 @@ export function setCachedLink(userId, longUrl, link) {
   cache.set(cacheKey(userId, longUrl), link);
 }
 
+export function deleteCachedLink(userId, longUrl) {
+  cache.delete(cacheKey(userId, longUrl));
+}
+
 export function clearUrlCache() {
   cache.clear();
 }
