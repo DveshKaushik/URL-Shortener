@@ -15,8 +15,10 @@
   "dependencies": {
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
+    "disposable-email-domains": "^1.0.62",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.7.4",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.22.0",
     "ua-parser-js": "^2.0.10"

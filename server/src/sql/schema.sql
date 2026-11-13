@@ -34,6 +34,7 @@ ALTER TABLE links ALTER COLUMN short_code TYPE VARCHAR(64);
 CREATE INDEX IF NOT EXISTS idx_links_user_long_url ON links (user_id, long_url);
 
 ALTER TABLE links ADD COLUMN IF NOT EXISTS unique_click_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE links ADD COLUMN IF NOT EXISTS title VARCHAR(80);
 
 -- One row per redirect click (server-side analytics)
 CREATE TABLE IF NOT EXISTS link_clicks (

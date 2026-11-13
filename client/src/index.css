@@ -1,21 +1,80 @@
-:root {
-  --ink: #071410;
-  --panel: #0d221c;
-  --panel-2: #123028;
-  --line: #1f473c;
-  --text: #e8f5ef;
-  --muted: #8fb3a6;
-  --accent: #b8f34d;
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+  --canvas: #eef6f1;
+  --ink: #0b1f1a;
+  --panel: rgba(255, 255, 255, 0.72);
+  --line: rgba(11, 31, 26, 0.12);
+  --line-strong: rgba(11, 31, 26, 0.22);
+  --text: #0b1f1a;
+  --muted: #4d6b60;
+  --accent: #c8f04a;
   --accent-ink: #102016;
-  --danger: #ff7b6b;
-  --glow: rgba(184, 243, 77, 0.18);
-  font-family: 'Syne', sans-serif;
+  --danger: #c44536;
+  --success: #1f7a4c;
+  --focus: rgba(200, 240, 74, 0.45);
+  --input-bg: #ffffff;
+  --card: rgba(255, 255, 255, 0.55);
+  --tab-track: rgba(255, 255, 255, 0.45);
+  --tab-active-bg: #0b1f1a;
+  --tab-active-fg: #f3faf6;
+  --ghost-hover: rgba(11, 31, 26, 0.04);
+  --qr-bg: #f3faf6;
+  --qr-fg: #0b1f1a;
+  --scheduled: #8a6a18;
+  --scheduled-line: #c9a227;
+  --grid: rgba(11, 31, 26, 0.035);
+  --orb-a: rgba(200, 240, 74, 0.45);
+  --orb-b: rgba(46, 122, 96, 0.22);
+  --wash-a: rgba(200, 240, 74, 0.35);
+  --wash-b: rgba(56, 140, 110, 0.18);
+  --wash-1: #e8f4ee;
+  --wash-2: #eef6f1;
+  --wash-3: #e4efe8;
+  --radius: 0.85rem;
+  --font-display: 'Syne', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  font-family: var(--font-display);
   color: var(--text);
-  background: var(--ink);
+  background: var(--canvas);
   line-height: 1.45;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --canvas: #071410;
+  --ink: #e8f5ef;
+  --panel: rgba(13, 34, 28, 0.78);
+  --line: rgba(232, 245, 239, 0.1);
+  --line-strong: rgba(232, 245, 239, 0.22);
+  --text: #e8f5ef;
+  --muted: #8fb3a6;
+  --accent: #c8f04a;
+  --accent-ink: #102016;
+  --danger: #ff8b7c;
+  --success: #8ee0a8;
+  --focus: rgba(200, 240, 74, 0.28);
+  --input-bg: rgba(0, 0, 0, 0.32);
+  --card: rgba(0, 0, 0, 0.22);
+  --tab-track: rgba(0, 0, 0, 0.28);
+  --tab-active-bg: #c8f04a;
+  --tab-active-fg: #102016;
+  --ghost-hover: rgba(200, 240, 74, 0.1);
+  --qr-bg: #e8f5ef;
+  --qr-fg: #071410;
+  --scheduled: #ffe6a8;
+  --scheduled-line: #e2c56a;
+  --grid: rgba(232, 245, 239, 0.045);
+  --orb-a: rgba(200, 240, 74, 0.16);
+  --orb-b: rgba(56, 168, 140, 0.24);
+  --wash-a: rgba(200, 240, 74, 0.12);
+  --wash-b: rgba(56, 168, 140, 0.2);
+  --wash-1: #071410;
+  --wash-2: #0a1c17;
+  --wash-3: #0d241c;
 }
 
 * {
@@ -31,11 +90,13 @@ body,
 
 body {
   min-height: 100vh;
+  transition: background 0.35s ease, color 0.35s ease;
   background:
-    radial-gradient(ellipse 80% 50% at 10% -10%, rgba(184, 243, 77, 0.12), transparent 55%),
-    radial-gradient(ellipse 60% 40% at 90% 10%, rgba(56, 168, 140, 0.18), transparent 50%),
-    linear-gradient(160deg, #071410 0%, #0a1c17 45%, #0d241c 100%);
+    radial-gradient(ellipse 70% 45% at 8% -8%, var(--wash-a), transparent 55%),
+    radial-gradient(ellipse 55% 40% at 92% 0%, var(--wash-b), transparent 50%),
+    linear-gradient(165deg, var(--wash-1) 0%, var(--wash-2) 42%, var(--wash-3) 100%);
   background-attachment: fixed;
+  color: var(--text);
 }
 
 button,
@@ -49,4 +110,9 @@ button {
 
 a {
   color: inherit;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-ink);
 }

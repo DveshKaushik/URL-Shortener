@@ -11,7 +11,9 @@ async function request(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, options)
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new Error(data.error || 'Request failed')
+    const error = new Error(data.error || 'Request failed')
+    error.safety = data.safety || null
+    throw error
   }
   return data
 }
@@ -38,6 +40,14 @@ export function getMe(token) {
   })
 }
 
+export function checkDestination(token, longUrl) {
+  return request('/api/safety', {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ longUrl }),
+  })
+}
+
 export function shorten(token, longUrl, options = {}) {
   const body = { longUrl }
   if (typeof options.enabled === 'boolean') {
@@ -48,6 +58,9 @@ export function shorten(token, longUrl, options = {}) {
   }
   if (options.customAlias) {
     body.customAlias = options.customAlias
+  }
+  if (options.title) {
+    body.title = options.title
   }
   return request('/api/shorten', {
     method: 'POST',
@@ -67,5 +80,28 @@ export function updateLink(token, id, patch) {
     method: 'PATCH',
     headers: authHeaders(token),
     body: JSON.stringify(patch),
+  })
+}
+
+export function getOverview(token) {
+  return request('/api/analytics/overview', {
+    headers: authHeaders(token),
+  })
+}
+
+export function getLinkAnalytics(token, id) {
+  return request(`/api/links/${id}/analytics`, {
+    headers: authHeaders(token),
+  })
+}
+
+export function getReport(token, { from, to, linkId } = {}) {
+  const params = new URLSearchParams()
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  if (linkId) params.set('linkId', String(linkId))
+  const query = params.toString()
+  return request(`/api/reports${query ? `?${query}` : ''}`, {
+    headers: authHeaders(token),
   })
 }

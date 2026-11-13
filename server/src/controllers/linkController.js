@@ -6,9 +6,10 @@ import {
   setCachedLink,
 } from '../utils/urlCache.js';
 import { recordLinkClick } from '../utils/clickAnalytics.js';
+import { inspectUrl, safetyError } from '../utils/urlSafety.js';
 
 const LINK_COLUMNS =
-  'id, short_code, long_url, click_count, unique_click_count, created_at, expires_at, enabled, activates_at';
+  'id, short_code, long_url, title, click_count, unique_click_count, created_at, expires_at, enabled, activates_at';
 
 function isValidUrl(value) {
   try {
@@ -19,11 +20,28 @@ function isValidUrl(value) {
   }
 }
 
+async function rejectUnsafeDestination(res, longUrl) {
+  const safety = await inspectUrl(longUrl);
+  if (safety.verdict !== 'block') return safety;
+  res.status(403).json({ error: safetyError(safety), safety });
+  return null;
+}
+
 function parseOptionalDate(value) {
   if (value === undefined || value === null || value === '') return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return undefined;
   return date.toISOString();
+}
+
+/** null clears the name; undefined means the field was omitted or invalid. */
+function parseTitle(value) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== 'string') return undefined;
+  const title = value.trim();
+  if (title.length > 80) return undefined;
+  return title || null;
 }
 
 /** When activates_at is due, turn disabled links on. */
@@ -89,11 +107,31 @@ async function findExistingLink(userId, longUrl) {
   return link;
 }
 
+export async function checkDestination(req, res) {
+  const longUrl = typeof req.body.longUrl === 'string' ? req.body.longUrl.trim() : '';
+
+  if (!longUrl) {
+    return res.status(400).json({ error: 'longUrl is required' });
+  }
+  if (!isValidUrl(longUrl)) {
+    return res.status(400).json({ error: 'longUrl must be a valid http(s) URL' });
+  }
+
+  try {
+    const safety = await inspectUrl(longUrl);
+    res.json({ safety });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Something went wrong' });
+  }
+}
+
 export async function createShortLink(req, res) {
   const longUrl = typeof req.body.longUrl === 'string' ? req.body.longUrl.trim() : '';
   const userId = req.user.userId;
   const enabled = req.body.enabled === false ? false : true;
   const activatesAt = parseOptionalDate(req.body.activatesAt);
+  const title = parseTitle(req.body.title);
   const wantsCustomAlias =
     req.body.customAlias !== undefined &&
     req.body.customAlias !== null &&
@@ -107,8 +145,21 @@ export async function createShortLink(req, res) {
     return res.status(400).json({ error: 'longUrl must be a valid http(s) URL' });
   }
 
+  let safety;
+  try {
+    safety = await rejectUnsafeDestination(res, longUrl);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Something went wrong' });
+  }
+  if (!safety) return;
+
   if (activatesAt === undefined) {
     return res.status(400).json({ error: 'activatesAt must be a valid date' });
+  }
+
+  if (req.body.title !== undefined && title === undefined) {
+    return res.status(400).json({ error: 'title must be 80 characters or fewer' });
   }
 
   let customAlias = null;
@@ -135,23 +186,23 @@ export async function createShortLink(req, res) {
           );
           const link = result.rows[0] ?? existing;
           setCachedLink(userId, longUrl, link);
-          return res.status(200).json({ link, cached: true });
+          return res.status(200).json({ link, cached: true, safety });
         }
-        return res.status(200).json({ link: existing, cached: true });
+        return res.status(200).json({ link: existing, cached: true, safety });
       }
     }
 
     if (customAlias) {
       try {
         const result = await pool.query(
-          `INSERT INTO links (short_code, long_url, user_id, enabled, activates_at)
-           VALUES ($1, $2, $3, $4, $5)
+          `INSERT INTO links (short_code, long_url, user_id, enabled, activates_at, title)
+           VALUES ($1, $2, $3, $4, $5, $6)
            RETURNING ${LINK_COLUMNS}`,
-          [customAlias, longUrl, userId, enabled, activatesAt]
+          [customAlias, longUrl, userId, enabled, activatesAt, title ?? null]
         );
         const link = result.rows[0];
         setCachedLink(userId, longUrl, link);
-        return res.status(201).json({ link, cached: false });
+        return res.status(201).json({ link, cached: false, safety });
       } catch (err) {
         if (err.code === '23505') {
           return res.status(409).json({ error: 'That alias is already taken' });
@@ -170,15 +221,15 @@ export async function createShortLink(req, res) {
 
       try {
         const result = await pool.query(
-          `INSERT INTO links (short_code, long_url, user_id, enabled, activates_at)
-           VALUES ($1, $2, $3, $4, $5)
+          `INSERT INTO links (short_code, long_url, user_id, enabled, activates_at, title)
+           VALUES ($1, $2, $3, $4, $5, $6)
            RETURNING ${LINK_COLUMNS}`,
-          [shortCode, longUrl, userId, enabled, activatesAt]
+          [shortCode, longUrl, userId, enabled, activatesAt, title ?? null]
         );
         const link = result.rows[0];
         setCachedLink(userId, longUrl, link);
         inserted = true;
-        return res.status(201).json({ link, cached: false });
+        return res.status(201).json({ link, cached: false, safety });
       } catch (err) {
         if (err.code === '23505') {
           // Unique short_code collision — retry with a new code
@@ -230,6 +281,7 @@ export async function updateLink(req, res) {
   const values = [];
   let i = 1;
   let nextLongUrl = null;
+  let destinationSafety = null;
 
   if ('longUrl' in req.body) {
     const longUrl =
@@ -242,6 +294,13 @@ export async function updateLink(req, res) {
         .status(400)
         .json({ error: 'longUrl must be a valid http(s) URL' });
     }
+    try {
+      destinationSafety = await rejectUnsafeDestination(res, longUrl);
+      if (!destinationSafety) return;
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Something went wrong' });
+    }
     nextLongUrl = longUrl;
     updates.push(`long_url = $${i++}`);
     values.push(longUrl);
@@ -250,6 +309,15 @@ export async function updateLink(req, res) {
   if (typeof req.body.enabled === 'boolean') {
     updates.push(`enabled = $${i++}`);
     values.push(req.body.enabled);
+  }
+
+  if ('title' in req.body) {
+    const title = parseTitle(req.body.title);
+    if (title === undefined) {
+      return res.status(400).json({ error: 'title must be 80 characters or fewer' });
+    }
+    updates.push(`title = $${i++}`);
+    values.push(title);
   }
 
   if ('activatesAt' in req.body) {
@@ -314,7 +382,7 @@ export async function updateLink(req, res) {
     }
 
     setCachedLink(userId, link.long_url, link);
-    res.json({ link });
+    res.json({ link, ...(destinationSafety ? { safety: destinationSafety } : {}) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Something went wrong' });
@@ -326,7 +394,7 @@ export async function redirectToLongUrl(req, res) {
 
   // Keep reserved API paths from being treated as short codes
   if (
-    ['api', 'test-db', 'links', 'shorten', 'register', 'login', 'me', 'analytics'].includes(
+    ['api', 'test-db', 'links', 'shorten', 'safety', 'register', 'login', 'me', 'analytics', 'reports'].includes(
       code.toLowerCase()
     )
   ) {
@@ -368,6 +436,18 @@ export async function redirectToLongUrl(req, res) {
 
     if (!link.enabled) {
       return res.status(403).json({ error: 'This link is disabled' });
+    }
+
+    try {
+      const safety = await inspectUrl(link.long_url);
+      if (safety.verdict === 'block') {
+        return res.status(403).json({
+          error: 'This short link points to a blocked destination',
+          safety,
+        });
+      }
+    } catch (err) {
+      console.error('Destination safety check failed:', err);
     }
 
     res.redirect(link.long_url);
