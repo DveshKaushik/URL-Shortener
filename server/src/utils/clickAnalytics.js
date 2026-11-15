@@ -81,15 +81,18 @@ async function lookupGeo(ip) {
   const timer = setTimeout(() => controller.abort(), 1500);
 
   try {
-    const res = await fetch(
-      `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,country,city`,
-      { signal: controller.signal }
-    );
+    // Prefer HTTPS. Override with GEO_LOOKUP_URL if you use another provider.
+    const geoBase = (process.env.GEO_LOOKUP_URL || 'https://ipapi.co').replace(/\/$/, '');
+    const url = geoBase.includes('ip-api.com')
+      ? `${geoBase}/${encodeURIComponent(ip)}?fields=status,country,city`
+      : `${geoBase}/${encodeURIComponent(ip)}/json/`;
+
+    const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) return { country: null, city: null };
     const data = await res.json();
-    if (data.status !== 'success') return { country: null, city: null };
+    if (data.status === 'fail' || data.error) return { country: null, city: null };
     return {
-      country: data.country || null,
+      country: data.country || data.country_name || null,
       city: data.city || null,
     };
   } catch {

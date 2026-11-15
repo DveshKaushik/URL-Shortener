@@ -76,6 +76,7 @@ export default function App() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [links, setLinks] = useState([])
+  const [linksTotal, setLinksTotal] = useState(null)
   const [view, setView] = useState('dashboard')
   const [analyticsLinkId, setAnalyticsLinkId] = useState(null)
   const [error, setError] = useState('')
@@ -111,6 +112,7 @@ export default function App() {
     setToken('')
     setUserEmail('')
     setLinks([])
+    setLinksTotal(null)
     setView('dashboard')
     setAnalyticsLinkId(null)
   }
@@ -133,8 +135,11 @@ export default function App() {
             setUserEmail(nextEmail)
           }
         }
-        const data = await getLinks(token)
-        if (!cancelled) setLinks(data.links || [])
+        const data = await getLinks(token, { limit: 200, offset: 0 })
+        if (!cancelled) {
+          setLinks(data.links || [])
+          if (typeof data.total === 'number') setLinksTotal(data.total)
+        }
       } catch (err) {
         if (!cancelled) {
           clearSession()
@@ -147,9 +152,12 @@ export default function App() {
 
     function onVisible() {
       if (document.visibilityState === 'visible') {
-        getLinks(token)
+        getLinks(token, { limit: 200, offset: 0 })
           .then((data) => {
-            if (!cancelled) setLinks(data.links || [])
+            if (!cancelled) {
+              setLinks(data.links || [])
+              if (typeof data.total === 'number') setLinksTotal(data.total)
+            }
           })
           .catch(() => {})
       }
@@ -268,7 +276,8 @@ export default function App() {
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     required
-                    minLength={6}
+                    minLength={8}
+                    title="At least 8 characters with a letter and a number"
                     autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                   />
                 </label>
@@ -318,6 +327,8 @@ export default function App() {
                   token={token}
                   links={links}
                   setLinks={setLinks}
+                  linksTotal={linksTotal}
+                  setLinksTotal={setLinksTotal}
                   theme={theme}
                   onOpenAnalytics={openAnalytics}
                 />

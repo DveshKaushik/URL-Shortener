@@ -3,6 +3,7 @@ import { requireAuth } from '../middleware/auth.js';
 import {
   checkDestination,
   createShortLink,
+  deleteLink,
   getMyLinks,
   redirectToLongUrl,
   updateLink,
@@ -33,6 +34,7 @@ router.get('/analytics/overview', requireAuth, getOverview);
 router.get('/reports', requireAuth, getReport);
 router.get('/links/:id/analytics', requireAuth, getLinkAnalytics);
 router.patch('/links/:id', requireAuth, updateLink);
+router.delete('/links/:id', requireAuth, deleteLink);
 router.get('/:code', publicIpLimiter, redirectIpLimiter, redirectToLongUrl);
 
 export default router;

@@ -56,6 +56,9 @@ export function shorten(token, longUrl, options = {}) {
   if (options.activatesAt) {
     body.activatesAt = options.activatesAt
   }
+  if ('expiresAt' in options) {
+    body.expiresAt = options.expiresAt
+  }
   if (options.customAlias) {
     body.customAlias = options.customAlias
   }
@@ -69,8 +72,12 @@ export function shorten(token, longUrl, options = {}) {
   })
 }
 
-export function getLinks(token) {
-  return request('/api/links', {
+export function getLinks(token, { limit = 100, offset = 0 } = {}) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  })
+  return request(`/api/links?${params}`, {
     headers: authHeaders(token),
   })
 }
@@ -80,6 +87,13 @@ export function updateLink(token, id, patch) {
     method: 'PATCH',
     headers: authHeaders(token),
     body: JSON.stringify(patch),
+  })
+}
+
+export function deleteLink(token, id) {
+  return request(`/api/links/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(token),
   })
 }
 

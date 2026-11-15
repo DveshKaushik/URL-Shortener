@@ -497,7 +497,8 @@ async function checkSafeBrowsing(rawUrl) {
   }
 }
 
-export async function inspectUrl(rawUrl) {
+/** Fast local-only check (no Safe Browsing). Prefer this on the redirect hot path. */
+export function inspectUrlLocal(rawUrl) {
   const report = localInspect(rawUrl);
   if (!report) {
     return {
@@ -511,6 +512,11 @@ export async function inspectUrl(rawUrl) {
       ],
     };
   }
+  return report;
+}
+
+export async function inspectUrl(rawUrl) {
+  const report = inspectUrlLocal(rawUrl);
 
   const threat = await checkSafeBrowsing(rawUrl);
   if (threat) {

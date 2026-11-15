@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import dotenv from 'dotenv';
 import pool from './db.js';
 import authRoutes from './routes/auth.js';
@@ -8,26 +9,55 @@ import linkRoutes from './routes/link.js';
 
 dotenv.config();
 
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET || JWT_SECRET === 'change-me' || JWT_SECRET.length < 32) {
+  console.error(
+    'Fatal: set JWT_SECRET in server/.env to a strong secret (32+ characters), not "change-me".'
+  );
+  process.exit(1);
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Correct client IP behind reverse proxies (for geo / unique visitors)
 app.set('trust proxy', 1);
 
-app.use(cors());
-app.use(express.json());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
+
+const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Allow non-browser clients (curl, server-to-server) with no Origin
+      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
+  })
+);
+
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '32kb' }));
 
 app.get('/', (req, res) => {
   res.send('URL shortener API is running');
 });
 
-app.get('/test-db', async (req, res) => {
+app.get('/health', async (req, res) => {
   try {
-    const result = await pool.query('SELECT NOW()');
-    res.json({ dbTime: result.rows[0] });
+    await pool.query('SELECT 1');
+    res.json({ ok: true, db: true });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Database connection failed' });
+    res.status(503).json({ ok: false, db: false });
   }
 });
 

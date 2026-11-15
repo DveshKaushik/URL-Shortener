@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { QRCodeCanvas } from 'qrcode.react'
-import { SHORT_BASE, checkDestination, shorten, updateLink } from '../api.js'
+import {
+  SHORT_BASE,
+  checkDestination,
+  deleteLink,
+  getLinks,
+  shorten,
+  updateLink,
+} from '../api.js'
 import SafetyReport from '../components/SafetyReport.jsx'
 import { fromLocalInputValue, linkLabel, linkStatus, toLocalInputValue } from '../lib/links.js'
 
@@ -34,22 +41,36 @@ const FILTERS = [
   { id: 'active', label: 'Active' },
   { id: 'scheduled', label: 'Scheduled' },
   { id: 'disabled', label: 'Disabled' },
+  { id: 'expired', label: 'Expired' },
 ]
 
-export default function MyLinks({ token, links, setLinks, theme, onOpenAnalytics }) {
+const PAGE_SIZE = 100
+
+export default function MyLinks({
+  token,
+  links,
+  setLinks,
+  linksTotal,
+  setLinksTotal,
+  theme,
+  onOpenAnalytics,
+}) {
   const [longUrl, setLongUrl] = useState('')
   const [customAlias, setCustomAlias] = useState('')
   const [title, setTitle] = useState('')
   const [activatesAt, setActivatesAt] = useState('')
+  const [expiresAt, setExpiresAt] = useState('')
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
   const [sort, setSort] = useState('newest')
   const [scheduleDrafts, setScheduleDrafts] = useState({})
+  const [expiryDrafts, setExpiryDrafts] = useState({})
   const [destinationDrafts, setDestinationDrafts] = useState({})
   const [titleDrafts, setTitleDrafts] = useState({})
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [safety, setSafety] = useState(null)
   const [checking, setChecking] = useState(false)
 
@@ -58,6 +79,13 @@ export default function MyLinks({ token, links, setLinks, theme, onOpenAnalytics
       const next = {}
       for (const link of links) {
         next[link.id] = link.id in prev ? prev[link.id] : toLocalInputValue(link.activates_at)
+      }
+      return next
+    })
+    setExpiryDrafts((prev) => {
+      const next = {}
+      for (const link of links) {
+        next[link.id] = link.id in prev ? prev[link.id] : toLocalInputValue(link.expires_at)
       }
       return next
     })
@@ -110,8 +138,29 @@ export default function MyLinks({ token, links, setLinks, theme, onOpenAnalytics
       ...prev,
       [updated.id]: toLocalInputValue(updated.activates_at),
     }))
+    setExpiryDrafts((prev) => ({
+      ...prev,
+      [updated.id]: toLocalInputValue(updated.expires_at),
+    }))
     setDestinationDrafts((prev) => ({ ...prev, [updated.id]: updated.long_url }))
     setTitleDrafts((prev) => ({ ...prev, [updated.id]: updated.title || '' }))
+  }
+
+  async function handleLoadMore() {
+    setError('')
+    setLoadingMore(true)
+    try {
+      const data = await getLinks(token, { limit: PAGE_SIZE, offset: links.length })
+      setLinks((prev) => {
+        const seen = new Set(prev.map((link) => link.id))
+        return [...prev, ...(data.links || []).filter((link) => !seen.has(link.id))]
+      })
+      if (typeof data.total === 'number') setLinksTotal(data.total)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoadingMore(false)
+    }
   }
 
   const visible = useMemo(() => {
@@ -146,17 +195,20 @@ export default function MyLinks({ token, links, setLinks, theme, onOpenAnalytics
       const name = title.trim()
       const data = await shorten(token, longUrl.trim(), {
         activatesAt: fromLocalInputValue(activatesAt),
+        expiresAt: fromLocalInputValue(expiresAt),
         ...(alias ? { customAlias: alias } : {}),
         ...(name ? { title: name } : {}),
       })
       const shortUrl = `${SHORT_BASE}/${data.link.short_code}`
       setLinks((prev) => [data.link, ...prev.filter((link) => link.id !== data.link.id)])
+      setLinksTotal((prev) => (typeof prev === 'number' ? prev + (data.cached ? 0 : 1) : prev))
       const flagged = data.safety?.verdict === 'warn' ? ` Flagged: ${data.safety.summary}` : ''
       setNotice((data.cached ? `Already shortened: ${shortUrl}` : shortUrl) + flagged)
       setLongUrl('')
       setCustomAlias('')
       setTitle('')
       setActivatesAt('')
+      setExpiresAt('')
     } catch (err) {
       setError(err.message)
       if (err.safety) setSafety(err.safety)
@@ -191,6 +243,40 @@ export default function MyLinks({ token, links, setLinks, theme, onOpenAnalytics
           ? `Activates ${new Date(data.link.activates_at).toLocaleString()}`
           : 'Schedule cleared — link is active now'
       )
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function handleSaveExpiry(link, draftOverride) {
+    setError('')
+    setNotice('')
+    try {
+      const draft = draftOverride !== undefined ? draftOverride : expiryDrafts[link.id] || ''
+      const data = await updateLink(token, link.id, {
+        expiresAt: fromLocalInputValue(draft),
+      })
+      replaceLink(data.link)
+      setNotice(
+        data.link.expires_at
+          ? `Expires ${new Date(data.link.expires_at).toLocaleString()}`
+          : 'Expiry cleared'
+      )
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function handleDelete(link) {
+    const label = linkLabel(link)
+    if (!window.confirm(`Delete “${label}”? This cannot be undone.`)) return
+    setError('')
+    setNotice('')
+    try {
+      await deleteLink(token, link.id)
+      setLinks((prev) => prev.filter((item) => item.id !== link.id))
+      setLinksTotal((prev) => (typeof prev === 'number' ? Math.max(0, prev - 1) : prev))
+      setNotice(`Deleted ${label}`)
     } catch (err) {
       setError(err.message)
     }
@@ -267,7 +353,7 @@ export default function MyLinks({ token, links, setLinks, theme, onOpenAnalytics
             </button>
           </div>
         </label>
-        <div className="composer-options composer-options-3">
+        <div className="composer-options composer-options-4">
           <label>
             Name
             <input
@@ -302,6 +388,14 @@ export default function MyLinks({ token, links, setLinks, theme, onOpenAnalytics
               type="datetime-local"
               value={activatesAt}
               onChange={(event) => setActivatesAt(event.target.value)}
+            />
+          </label>
+          <label className="activate-at">
+            Expires at
+            <input
+              type="datetime-local"
+              value={expiresAt}
+              onChange={(event) => setExpiresAt(event.target.value)}
             />
           </label>
         </div>
@@ -351,6 +445,9 @@ export default function MyLinks({ token, links, setLinks, theme, onOpenAnalytics
           <span className="links-count">
             {visible.length}
             {visible.length !== links.length ? ` of ${links.length}` : ''}
+            {typeof linksTotal === 'number' && linksTotal > links.length
+              ? ` · ${linksTotal} total`
+              : ''}
           </span>
         </div>
 
@@ -445,6 +542,9 @@ export default function MyLinks({ token, links, setLinks, theme, onOpenAnalytics
                     <button className="ghost-btn" type="button" onClick={() => onOpenAnalytics(link.id)}>
                       Analytics
                     </button>
+                    <button className="ghost-btn danger-btn" type="button" onClick={() => handleDelete(link)}>
+                      Delete
+                    </button>
                   </div>
 
                   <div className="link-schedule">
@@ -468,6 +568,34 @@ export default function MyLinks({ token, links, setLinks, theme, onOpenAnalytics
                         onClick={() => {
                           setScheduleDrafts((prev) => ({ ...prev, [link.id]: '' }))
                           handleSaveSchedule(link, '')
+                        }}
+                      >
+                        Clear
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="link-schedule">
+                    <label className="activate-at">
+                      Expires at
+                      <input
+                        type="datetime-local"
+                        value={expiryDrafts[link.id] || ''}
+                        onChange={(event) =>
+                          setExpiryDrafts((prev) => ({ ...prev, [link.id]: event.target.value }))
+                        }
+                      />
+                    </label>
+                    <button className="ghost-btn" type="button" onClick={() => handleSaveExpiry(link)}>
+                      Save expiry
+                    </button>
+                    {expiryDrafts[link.id] || link.expires_at ? (
+                      <button
+                        className="ghost-btn"
+                        type="button"
+                        onClick={() => {
+                          setExpiryDrafts((prev) => ({ ...prev, [link.id]: '' }))
+                          handleSaveExpiry(link, '')
                         }}
                       >
                         Clear
@@ -500,6 +628,19 @@ export default function MyLinks({ token, links, setLinks, theme, onOpenAnalytics
             )
           })
         )}
+
+        {typeof linksTotal === 'number' && links.length < linksTotal ? (
+          <div className="load-more-row">
+            <button
+              className="ghost-btn"
+              type="button"
+              onClick={handleLoadMore}
+              disabled={loadingMore}
+            >
+              {loadingMore ? 'Loading…' : `Load more (${links.length} of ${linksTotal})`}
+            </button>
+          </div>
+        ) : null}
       </section>
     </div>
   )

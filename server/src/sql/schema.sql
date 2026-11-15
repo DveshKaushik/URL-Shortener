@@ -35,6 +35,8 @@ CREATE INDEX IF NOT EXISTS idx_links_user_long_url ON links (user_id, long_url);
 
 ALTER TABLE links ADD COLUMN IF NOT EXISTS unique_click_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE links ADD COLUMN IF NOT EXISTS title VARCHAR(80);
+ALTER TABLE links ADD COLUMN IF NOT EXISTS safety_verdict VARCHAR(16);
+ALTER TABLE links ADD COLUMN IF NOT EXISTS safety_checked_at TIMESTAMPTZ;
 
 -- One row per redirect click (server-side analytics)
 CREATE TABLE IF NOT EXISTS link_clicks (

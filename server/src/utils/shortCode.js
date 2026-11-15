@@ -1,11 +1,17 @@
+import crypto from 'crypto';
+
 const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
-const RESERVED_ALIASES = new Set([
+/** Paths that must never be claimed as short codes / custom aliases */
+export const RESERVED_ALIASES = new Set([
   'api',
+  'health',
   'test-db',
   'links',
   'analytics',
+  'reports',
   'shorten',
+  'safety',
   'register',
   'login',
   'me',
@@ -16,10 +22,14 @@ const ALIAS_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/;
 export function generateShortCode(length = 7) {
   let code = '';
   for (let i = 0; i < length; i++) {
-    const randomIndex = Math.floor(Math.random() * CHARS.length);
+    const randomIndex = crypto.randomInt(0, CHARS.length);
     code += CHARS[randomIndex];
   }
   return code;
+}
+
+export function isReservedAlias(code) {
+  return RESERVED_ALIASES.has(String(code || '').toLowerCase());
 }
 
 /**

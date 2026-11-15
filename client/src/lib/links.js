@@ -32,6 +32,9 @@ export function rangeFromDateInputs(fromValue, toValue) {
 }
 
 export function linkStatus(link) {
+  if (link.expires_at && new Date(link.expires_at) <= new Date()) {
+    return { key: 'expired', label: 'Expired' }
+  }
   if (link.activates_at && new Date(link.activates_at) > new Date()) {
     return { key: 'scheduled', label: 'Scheduled' }
   }
@@ -51,6 +54,7 @@ export function summarizeLinks(links) {
     active: 0,
     scheduled: 0,
     disabled: 0,
+    expired: 0,
   }
   for (const link of links) {
     totals.clicks += link.click_count ?? 0

@@ -62,7 +62,10 @@ export default function Dashboard({ token, links, onOpenAnalytics }) {
         </article>
         <article className="stat-card">
           <strong>{totals.active}</strong>
-          <span>{totals.scheduled} scheduled</span>
+          <span>
+            {totals.scheduled} scheduled
+            {totals.expired ? ` · ${totals.expired} expired` : ''}
+          </span>
         </article>
       </section>
 

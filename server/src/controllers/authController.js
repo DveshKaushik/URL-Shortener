@@ -1,16 +1,23 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import pool from '../db.js';
+import { normalizeEmail, validatePassword } from '../utils/authValidation.js';
 
 export async function register(req, res) {
-  const { email, password } = req.body;
-
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
+  const emailResult = normalizeEmail(req.body.email, { rejectDisposable: true });
+  if (!emailResult.ok) {
+    return res.status(400).json({ error: emailResult.error });
   }
 
+  const passwordResult = validatePassword(req.body.password);
+  if (!passwordResult.ok) {
+    return res.status(400).json({ error: passwordResult.error });
+  }
+
+  const { email } = emailResult;
+  const { password } = req.body;
+
   try {
-    // hash the password — 10 is the "salt rounds" (cost factor)
     const passwordHash = await bcrypt.hash(password, 10);
 
     const result = await pool.query(
@@ -21,19 +28,25 @@ export async function register(req, res) {
     res.status(201).json({ user: result.rows[0] });
   } catch (err) {
     if (err.code === '23505') {
-      // Postgres unique_violation error code
       return res.status(409).json({ error: 'Email already registered' });
     }
     console.error(err);
     res.status(500).json({ error: 'Something went wrong' });
   }
 }
-export async function login(req, res) {
-  const { email, password } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
+export async function login(req, res) {
+  const emailResult = normalizeEmail(req.body.email);
+  if (!emailResult.ok) {
+    return res.status(400).json({ error: emailResult.error });
   }
+
+  if (typeof req.body.password !== 'string' || !req.body.password) {
+    return res.status(400).json({ error: 'Password is required' });
+  }
+
+  const { email } = emailResult;
+  const { password } = req.body;
 
   try {
     const result = await pool.query(
@@ -44,7 +57,6 @@ export async function login(req, res) {
     const user = result.rows[0];
 
     if (!user) {
-      // deliberately vague — don't reveal whether the email exists
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
@@ -57,7 +69,7 @@ export async function login(req, res) {
     const token = jwt.sign(
       { userId: user.id, email: user.email },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
 
     res.json({
